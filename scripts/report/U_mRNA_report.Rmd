@@ -1,0 +1,1041 @@
+---
+title: "mRNA-seq测序分析报告"
+author: ""
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    toc_depth: 2
+    fig_caption: yes
+    number_sections: yes
+    theme: journal
+    highlight: tango
+
+---
+
+
+```{r setup, include=FALSE}
+library(rmarkdown)
+library(knitr)
+library(readxl)
+library(tidyverse)
+library(kableExtra)
+library(slickR)
+library(DT)
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE, fig.align = "center", fig.height=4, fig.width = 8)
+```
+
+# 项目信息
+
+## 样本信息与分组
+
+样本的分组和差异分析方案按照老师填写的样本信息表进行分析. 
+
+本项目的物种信息为：
+
+
+```{r species}
+species <- read_tsv(snakemake@input[["species"]])
+kable(species) %>% kable_styling(bootstrap_options = "striped", full_width = F, position = "center")
+```
+
+本项目的样本分组见下表：
+
+
+```{r metadata}
+metadata <- read_tsv(snakemake@input[["metadata"]]) %>% select(-fq1, -fq2)
+kable(metadata, caption = "样本分组信息表") %>% kable_styling(bootstrap_options = "striped", full_width = F, position = "center")
+```
+
+本项目的差异分析方案见下表:
+
+
+```{r diff_lst}
+diff_lst <- read_tsv(snakemake@input[["diff_lst"]], col_names = FALSE)
+colnames(diff_lst) <- c("差异方案", "组别类型", "实验组", "对照组")
+kable(diff_lst) %>% kable_styling(bootstrap_options = "striped", full_width = F, position = "center")
+```
+
+# 项目流程
+
+## mRNA-seq 简介
+
+转录组是特定物种、组织或细胞类型在某个时期或条件处理下，转录的所有 RNA（转录本）的集合，包括 mRNA 和非编码 RNA。目前所说的转录组测序，即对所有的 mRNA 进行测序分析。转录组测序实验的优势在于，既可利用高通量测序技术全面快速得到已知基因表达丰度变化，同时还可以通过测定的序列信息精确地分析转录本的 SNP/InDel（编码序列单核苷酸多态性/插入缺失）、可变剪接、融合基因等序列及结构变异。另外，通过增加测序数据量，转录组测序对于检测低丰度转录本和发现新转录本（进而预测新的基因）也具有其独特的优势。
+
+转录组项目 RNA-seq 的实验部分流程主要包括：样品的质量检测, 双链 cDNA 的合成, 转录组文库的构建与质检, 样本的上机测序.
+
+## 实验流程图
+
+
+```{r experiment1, fig.cap="普通mRNA-seq实验流程图"}
+# include_graphics(snakemake@params[["experiment1"]])
+snakemake@input[["experiment1"]] %>% slickR::slickR(slideId = "experiment1")
+```
+
+
+## 实验试剂与仪器
+
+| 名称                                                | 生产厂家                 |
+| :--------------------------------------------------- | :------------------------ |
+| KAPA HiFi Hotstart PCR Kit                          | KAPA Biosystems          |
+| QIA quick Gel Extraction Kit                        | Qiagen                   |
+| AGENCOURT®AMPURE® XP Kit                            | Beckman Coulter, Inc.    |
+| KAPA Library Quantification Kit Illumina® Platforms | KAPA Biosystems          |
+| T100™ Thermal Cycler (PCR 仪)                       | Bio-RAD Inc.             |
+| Qubit® Fluorometers (荧光定量仪)                    | Thermo Fisher Scientific |
+| Qseq100 DNA Analyzer                                | Bioptic Inc.             |
+| LightCycler® 96 (实时定量 PCR 仪)                   | Roche Inc.               |
+| Novaseq 6000® Sytem                                 | Illumina Inc.            |
+
+## 实验步骤
+
+### mRNA分离
+
+1. 预热65°C和80°C的水浴锅两个。
+2. 取RNA样品3-10ug加入到一个1.5mL的离心管中，用NF-H2O补至50uL，放置冰上备用。
+3. 取50uL Oligo d(T)的beads，加入到准备好的RNA样本中，用移液器吹打混匀。
+4. 将混合样本放入65°C水浴锅，放置5min，使RNA变性。
+5. 室温放置5min，使mRNA结合到磁珠上。
+6. 将样品置于磁力架上5min，待溶液清澈，小心移除上清。
+7. 加入200uL Washing Buffer，吹打混合均匀，在磁力架上放置5min，待溶液清澈，小心移除上清。
+8. 加入50uL Tris Buffer，重悬磁珠，混合均匀。
+9. 将样本放入80°C水浴锅，放置2min，室温放置5min，使mRNA洗脱下来。
+10. 加入50uL Binding Buffer，吹打混合均匀。
+11. 室温放置5min，使mRNA结合到磁珠上。
+12. 将样品置于磁力架上5min，待溶液清澈，小心移除上清。
+13. 加入200uL Washing Buffer，吹打混合均匀，在磁力架上放置5min，待溶液清澈，小心移除上清。
+14. 加入16uL NF-H2O，重悬磁珠，混合均匀。
+15. 将样本放入80°C水浴锅，放置2min，立即将样品置于磁力架上2min，待溶液清澈，转移15uL的上清液至一个新的200uL PCR管中，收集产物用于下游实验。
+
+### mRNA片段化
+
+1. 在新的200uL PCR管中配制如下反应：
+
+  | mRNA             | 15 uL|
+  | ---------------- | -----|
+  |SMART-Frag Buffer | 4 uL |
+  |SMART-RT primer   | 1 uL |
+  |总体积             | 20 uL|
+
+2. 置PCR 仪上85°C 处理3min，立即置冰上。
+
+
+### 反转录、加接头
+
+1. 在上一步反应的PCR管中加入一下试剂：
+
+  | SMART-RT Buffer | 4.5 uL  |
+  | --------------- | ------- |
+  | RNase inhibitor | 0.5uL   |
+  | SMART-RT Enzyme | 0.5uL   |
+  | 总体积          | 25.5 uL |
+
+2. 混合均匀，室温放置10分钟。PCR仪上42°C反应60min。
+
+3. 取出足量的Stranded Oligo（按照1uL/样本的量），置于70°C变性2min，立即置于冰上。
+
+  （注：Stranded Oligo每次分装少量使用，变性后的剩余量需丢弃）
+
+4. 将步骤3变性后的Stranded Oligo取1 uL加入步骤2的反应产物中，充分混匀，PCR仪上42°C反应30 min。
+
+5. 用磁珠纯化、筛选反应产物，步骤如下：
+
+（本方案实验结果的文库目的片段大小为300~500bp）
+
+1. 使用NF-H2O将PCR产物补足至50uL
+
+2. 将室温放置30min后的AMPure XP beads涡旋震荡混匀，吸取35 uL至上游产物中，移液器轻轻吹打10次充分混匀，将混合样本转移至一个1.5mL的离心管，室温孵育5分钟。
+
+3. 将1.5mL离心管瞬时低速离心并置于磁力架上，室温放置10min，待溶液澄清，转移上清至一个新的1.5mL离心管中，丢弃磁珠；
+
+4. 向上清中加入8uL的AMPure XP beads，移液器轻轻吹打10次充分混匀，室温孵育10min；
+
+5. 将1.5mL离心管短暂离心并置于磁力架中分离磁珠和液体，室温放置5min，待溶液澄清移除上清；
+
+6. 保持1.5mL离心管始终处于磁力架中，加入200uL 80% 乙醇（现用现配）漂洗磁珠，室温孵育30s后移除上清；
+
+7. 再次加入200uL 80% 乙醇（现用现配）漂洗磁珠，瞬时低速离心，室温孵育30s后移除上清；
+
+8. 保持1.5mL离心管始终处于磁力架上，开盖空气干燥磁珠5min；将EP管从磁力架中取出，加入22uL NF-H2O洗脱，涡旋振荡或使用移液器轻轻吹打充分混匀；
+
+9. 将1.5mL离心管瞬时低速离心并置于磁力架中分离磁珠和液体，待溶液澄清，吸取21uL上清至干净的200uL PCR管中，待用。
+
+### PCR扩增
+
+在新的200uL PCR管中配制如下反应：
+
+| 纯化产物                | 21 uL |
+| ----------------------- | ----- |
+| PCR Master Mix          | 25 uL |
+| SMART-Universal Primer  | 2 uL  |
+| SMART- Primer8 Index N* | 2 uL  |
+| 总体积                  | 50 uL |
+
+SMART-RNAseq Library Index kit提供多种index，可根据样本数量选购。
+
+充分混匀后在PCR仪中，进行如下反应：
+
+| 温度 | 时间 | 循环数   |
+| ---- | ---- | :------- |
+| 98℃  | 30s  |          |
+| 98℃  | 10s  | 18Cycles |
+| 65℃  | 30s  | 18Cycles |
+| 72℃  | 45s  | 18Cycles |
+| 72℃  | 5min |          |
+| 4℃   | ∞    |          |
+
+反应结束后取出，进行片段筛选。 
+
+### 文库纯化
+
+1. 使用NF-H2O将PCR产物补足至50uL（PCR过程中会有部分液体损失）。
+
+2. 将室温放置30min后的AMPure XP beads涡旋震荡混匀，吸取40uL的AMPure XP beads加入到50uL PCR产物中，移液器轻轻吹打10次充分混匀，加入1.5mL 离心管中，室温放置5min；
+
+3. 将1.5mL离心管瞬时低速离心并置于磁力架中分离磁珠和液体，室温放置5min，待溶液澄清移除上清；
+
+4. 保持1.5mL离心管始终处于磁力架中，加入200uL 80% 乙醇（现用现配）漂洗磁珠，室温孵育30s后移除上清；
+
+5. 再次加入200uL 80% 乙醇（现用现配）漂洗磁珠，瞬时低速离心，室温孵育30s后移除上清；
+
+6. 保持1.5mL离心管始终处于磁力架上，开盖空气干燥磁珠5min；将1.5mL管从磁力架中取出，加入16uL NF-H2O洗脱，涡旋振荡或使用移液器轻轻吹打充分混匀；
+
+7. 将1.5mL管瞬时低速离心并置于磁力架中分离磁珠和液体，待溶液澄清，吸取15uL上清至干净的200uL PCR管中；
+
+### 文库质检
+
+文库质检分为两方面，定性检测和定量检测。
+
+文库的定性检测，推荐使用凝胶电泳或者Agilent生物分析仪等方案对文库进行检测；文库的定量检测，推荐使用Realtime PCR对文库进行检测。
+
+### 上机测序
+
+库检合格后，把不同文库按照有效浓度及目标下机数据量的需求pooling后进行Illumina Novaseq 6000测序。
+
+## 数据分析流程
+
+### 数据分析流程图
+
+
+```{r analysis, fig.cap="数据分析流程图"}
+include_graphics(snakemake@params[["analysis"]])
+```
+
+
+## 原始数据质量评估
+
+### 原始数据过滤
+
+原始测序数据（Raw Data）中一般会有少部分的 Reads 带有测序引物、接头等人工序列，为保证 后续分析的准确性，需要先对 Raw Data 进行过滤，去除影响数据质量和后续分析的低质量数据、测序接头。使用[fastp](https://github.com/OpenGene/fastp){target="_blank"} 软件对 Raw Data 进行过滤，质控主要包括以下几个步骤：
+
+1. 去除引物和接头序列（Adaptor）；
+2. 去除片段长度<50bp 的序列；
+3. 去除 N 碱基达到一定比例的 reads（默认设为5bp）；
+4. 去除质量值小于20的低质量碱基；
+5. 以4碱基为窗口计算碱基平均质量值，若碱基平均质量值低于20（Q20）则切除。
+
+
+### 过滤前后测序数据量统计
+
+结果如下表所示（详细结果: Data_clean/filter_stats.xls）：
+
+
+```{r fastp_stats}
+fastp_stats <- read_tsv(snakemake@input[["fastp_stats"]]) %>% select(sample, raw_data_reads, raw_data_bases, clean_data_reads, clean_data_bases)
+# kable(fastp_stats, caption = "数据过滤前后测序数据量统计") %>% 
+#   kable_styling(bootstrap_options = "striped", full_width = F, position = "center") %>%
+#   footnote(general = "sample: 样本名称\nraw_data_reads: 原始数据reads数\nraw_data_bases: 原始数据碱基数\nclean_data_reads: 过滤后数据reads数\nclean_data_bases: 过滤后数据碱基数")
+datatable(fastp_stats, rownames = FALSE, filter="top", caption = htmltools::tags$caption(
+   style = 'text-align: center;', htmltools::em('数据过滤前后测序数据量统计')), options = list(pageLength = 5, scrollX=T) )
+```
+
+注：  
+sample: 样本名称  
+raw_data_reads: 原始数据reads数  
+raw_data_bases: 原始数据碱基数  
+clean_data_reads: 过滤后数据reads数  
+clean_data_bases: 过滤后数据碱基数  
+
+### 测序错误率分布
+
+测序错误率分布检查用于检测在测序长度范围内，有无某些位置的碱基存在异常的高错误率，例如若Read1或Read2中间位置的碱基测序错误率显著高于其他位置，则说明可能存在异常碱基。结果如下图所示（详细结果：Data_clean/Error）：
+
+
+```{r Error_plot, fig.cap="测序错误率分布图"}
+snakemake@input[["Error"]] %>% slickR::slickR(slideId = "Error_plot")
+```
+
+### GC含量分布
+
+核苷酸序列中鸟嘌呤（G）和胞嘧啶（C）所占的比例称为GC含量。GC含量在物种间存在一定特异性，但由于反转录过程中所使用的6bp随机引物，会引起前几位碱基在核苷酸组成上有一定偏好性，产生正常波动，随后则趋于稳定。结果如下图所示（详细结果：Data_clean/GC）：
+
+```{r GC_plot, fig.cap="GC含量分布图"}
+snakemake@input[["GC"]] %>% slickR::slickR(slideId = "GC_plot")
+```
+## 参考序列比对分析
+
+使用 [hisat2](https://ccb.jhu.edu/software/hisat2/index.shtml){target="_blank"} 将 Clean Data 与参考基因组进行相似性比对（mapping），获取 reads 在参考基因组上的位置信息，以及测序样本的特征信息，生成 bam 文件。
+
+### 比对结果统计
+
+比对率指 Mapped Reads 占 Clean Reads 的百分比，是测序数据利用率的最直接体现。比对率除了受数据测序质量影响外，还与参考基因组的组装和注释的完成度有关，完成度较高的比对率一般在 80-85% 以上；另外也与基因组亲缘关系和样本处理本身有关。若 Mapped 比例低于 70% ，一般是由于选用的参考基因组亲缘关系较远或者样本存在重大污染。通过比对率，可以评估测序数据与所选参考基因组是否能满足信息分析的需求。
+
+统计每个样本 reads 的比对情况，结果如下表所示（详细结果: QC/Mapping_stats.xls）：
+
+
+```{r hisat2_stats}
+hisat2_stats <- read_tsv(snakemake@input[["hisat2_stats"]])
+
+datatable(hisat2_stats, rownames = FALSE, filter="top", caption = htmltools::tags$caption(
+   style = 'text-align: center;', htmltools::em('基因组比对结果统计')), options = list(pageLength = 5, scrollX=T) )
+```
+
+注：  
+sample: 样本名  
+Total Clean Reads: clean data(去除核糖体序列后的数据)的reads数  
+Total Mapping Ratio: 比对到基因组上的reads占总reads的比例  
+Uniquely Mapping Ratio: 比对到基因组唯一位置的reads占总reads的比例  
+
+
+### 比对结果可视化
+我们可以提供RNA-seq clean_reads在基因组上比对结果的bam格式文件，部分物种还可提供相应的参考基因组和注释文件，此文件可使用IGV (Integrative Genomics Viewer) 浏览器进行可视化浏览。IGV浏览器能在不同尺度下显示单个或多个读段在基因组上的位置，能在不同尺度下显示不同区域的读段丰度，以反映不同区域的转录水平以及一些注释信息。
+IGV软件下载见:http://software.broadinstitute.org/software/igv/。
+
+```{r igv, fig.cap="IGV浏览器示例图"}
+include_graphics(snakemake@params[["igv"]])
+```
+
+# 数据分析结果展示
+### 基因组区域分布
+根据比对结果，分别统计reads在基因组外显子区域，内含子区域以及基因间区所占的比例。一般模式物种的基因注释较为完善（如人和小鼠），其比对到外显子区域的比例最高。比对到内含子区域的reads可能来源于前体mRNA或可变剪接事件滞留的内含子。比对到基因间区的reads，可能来源于ncRNA或少许DNA片段污染，也可能是基因注释还不够完善。所有样本的测序reads在基因组区域分布情况如下图所示（详细结果: QC/read_distribution）：
+
+
+```{r read_distribution_plot, fig.cap="reads在基因组不同区域的分布"}
+snakemake@input[["read_distribution_plot"]] %>% slickR::slickR(slideId = "read_distribution_plot")
+```
+
+### 转录组整体质量评估
+
+采用 [RSeQC](http://rseqc.sourceforge.net/){target="_blank"} 软件对转录组的数据进行质量评估， 质量评估合格后的测序数据才能在最终的生物信息学分析结果中体现真实的实验结果。
+
+
+#### RNA 降解分析
+
+mRNA 降解是样品中所有基因的 5’到 3’区域上序列覆盖情况的综合展现，用于评估测序实验结果的均一性，是否存在偏向性。在 RNA-seq 建库过程中，片段破碎和 RNA 反转录的顺序不一样会导致 RNA-seq 最终的数据呈现严重的 3’偏好性。其他因素还包括转录区域的 GC 含量不同、随机引物等等，并且生物体内从 5’或者 3’的降解过程同样会导致不均一性分布。结果如下（详细结果: QC/geneBody_coverage）：
+
+
+```{r geneBodyCoverage, fig.cap="基因覆盖度分析结果图"}
+snakemake@input[["geneBodyCoverage"]] %>% slickR::slickR(slideId = "geneBodyCoverage")
+```
+
+图中横坐标为单个基因的碱基长度占总碱基长度的百分比， 0 表示基因的 5’端， 100 表示基因的 3’端；纵坐标为比对到所有基因的横轴位置上相应区间内的序列条数的总和。图中体现了所有基因覆盖情况的叠加结果，曲线中每个点的纵坐标表示所有基因在该相对比例位置上所有序列的数量；曲线反映了测序所得序列是否在基因上均匀分布。如果在靠近左端有明显的峰值，说明测序结果有明显的 5’偏向性。如果在靠近右端有明显的峰值，说明测序结果有明显的 3’偏向性。本图左右两端未有明显峰值，说明测序结果不具有偏向性，结果较均一。曲线同时也展
+现了每个样本的 RNA 降解程度，当基因的 5’端和 3’端未见明显的变化时，说明该样本的 RNA降解情况不显著，或者多个样本的 5’端和 3’端的变化曲线相似，可以认为各样本间处于相对一致的 RNA 降解背景，不影响后续分析。
+
+
+#### 冗余序列分析
+
+冗余序列(duplicate reads)，也就是重复的序列。冗余序列主要来源于建库过程中的 PCR 扩增。如果建库扩增时不均匀，可能会导致部分基因冗余序列过高，造成冗余序列分布的异常。采用两种策略识别冗余序列，第一种是基于 sequence 的策略，如果序列相同，则判定为冗余序列；第二种是基于 mapping 的策略，如果两条 read 比对到参考基因组上的同一位置，则判定为冗余序列，分析结果如下（详细结果: QC/read_duplication）：
+
+
+```{r read_duplication, fig.cap="冗余序列分布频率图"}
+snakemake@input[["read_duplication"]] %>% slickR::slickR(slideId = "read_duplication")
+```
+
+横坐标表示冗余序列出现的次数，纵坐标表示在出现该次数的冗余序列的数量（以 10 为底求对数）。图中“ x ”表示基于所有序列的冗余分析,“·”表示基于比对到参考基因组上的序列的冗余分析；曲线整体趋势用于评估测序所得冗余序列的含量及比例，正常的结果为整体趋势呈线性平滑延伸扩散，随着横轴数值的增高，对应纵轴的数值下降。如出现峰值，则说明冗余序列含量异常。本图中未出现峰值，表明此样本冗余序列含量正常。
+
+
+## 新转录本分析
+
+### 新转录本预测
+
+转录组具有显著的组织特异性和时间特异性，即使是人类转录组，仍然有大量的新的转录本尚待发现。转录组测序的一项显著优势就在从测序数据中，挖掘出数据库和参考基因组中尚没有记录的全新转录本，并对它们进行编码能力分析，判断其是否具备蛋白编码功能，探讨其分子生物学功能。
+
+用 [stringtie](http://ccb.jhu.edu/software/stringtie/index.shtml){target="_blank"} 软件对 Mapped Reads 进行拼接, 与参考基因组的注释文件比较，寻找新的转录区，确定新转录本以及新基因。
+
+新转录本的注释文件示例如表所示（详细结果: novel_trans/new_trans.gtf）：
+
+
+```{r new_trans}
+new_trans <- read_tsv(snakemake@input[["new_trans"]], col_names = FALSE)
+colnames(new_trans) <- c("seqname", "source", "feature", "start", "end", "score", "strand", "frame", "attribute")
+datatable(head(new_trans), rownames = FALSE, filter="top", caption = htmltools::tags$caption(
+   style = 'text-align: center;', htmltools::em('新转录本的注释文件示例')), options = list(pageLength = 5, scrollX=T) )
+```
+
+注：  
+Seqname: 染色体编号  
+Source: 注释来源  
+Feature：区域类型  
+Start: feature起始坐标  
+End: feature终止坐标  
+Score: 相关评分信息(\".\"表示原注释信息中无评分信息)  
+Strand: 正负链信息  
+Frame: 结构特征(\".\"表示原注释信息中无评分信息)  
+Attributes: 属性，包括基因编号、转录本编号等信息  
+
+
+## 基因表达量分析
+
+一个基因表达水平的直接体现就是其转录本的丰度情况，转录本丰度程度越高，则基因表达水平越高。在 RNA-seq 分析中，我们可以通过定位到基因组区域或基因外显子区的测序序列(reads)的计数来估计基因的表达水平。 Reads 计数除了与基因的真实表达水平成正比外，还与基因的长度和测序深度成正相关。为了使不同基因、不同实验间估计的基因表达水平具有可比性，人们引入了 FPKM 的概念，即计算每个基因/转录本在样本中的 FPKM 值，以该值作为基因/转录本在样本中的表达量。 FPKM 是每百万 reads 中来自某一基因每千碱基长度的 fragments 数目,即两个 reads 能比对到同一个转录本的 fragments 数量。由于各基因碱基长度不同，在分析其特定表达量时，会将比对上的测序条数和其基因长度关联分析（具体公式如下）：
+$$
+FPKM = \frac{Total Fragments}{Mapped Fragments(millions) \times Length(kb)}
+$$
+公式中，Total Fragments 表示 map 到此转录本或基因的总 Fragments 数；Mapped Fragments(millions) 表示 Mapped Fragments 总数，以百万（106）为单位；Length(kb)，转录本或基因长度，以 kb 个碱基对为单位。FPKM 能消除长度和测序量差异对计算表达量的影响，计算得到的基因表达量可直接用于比较不同样品间的基因表达差异。
+
+使用 [HISAT2](https://ccb.jhu.edu/software/hisat2/index.shtml){target="_blank"} 将质量控制后的序列和参考基因组进行比对，利用 [stringtie](http://ccb.jhu.edu/software/stringtie/index.shtml){target="_blank"}对已知的和新的基因和转录本进行表达定量，结果如下表所示（详细结果: GeneExp/gene_fpkm_all_samples.txt）：
+
+
+```{r gene_fpkm}
+gene_fpkm <- read_tsv(snakemake@input[["gene_fpkm"]])
+if (length(gene_fpkm)>11){
+    gene_fpkm <- gene_fpkm[, 1:11]
+}
+datatable(head(gene_fpkm), rownames = FALSE, filter="top", caption = htmltools::tags$caption(
+   style = 'text-align: center;', htmltools::em('基因表达矩阵')), options = list(pageLength = 5, scrollX=T) )
+```
+
+注：Gene ID，基因ID\n其余列为样本名称, 此处最多展示10个样本列，单元格数据为FPKM值。  
+
+
+### 不同样品表达量对比
+
+通过所有基因的 FPKM 盒形图/分布图对不同分组样本的基因表达水平进行比较。对于同一实验条件下的重复样品，最终的 FPKM 为所有重复数据的平均值，结果如下图所示（详细结果: GeneExp/boxplot）：
+
+
+```{r exp_boxplot, fig.cap="FPKM 盒形图"}
+# include_graphics(snakemake@params[["exp_boxplot"]][1])
+snakemake@input[["exp_boxplot"]] %>% slickR::slickR(slideId = "exp_boxplot")
+```
+
+图中横坐标为样品名；纵坐标表示log~10~(FPKM)值。每个区域的盒形图为四个统计量(至上而下分别为最大值，上四分位数，下四分位数和最小值)，该图从表达量的总体的离散角度来衡量各样品之间的差异。
+
+
+```{r exp_density, fig.cap="FPKM密度分布图"}
+# include_graphics(snakemake@params[["exp_density"]][1])
+snakemake@input[["exp_density"]] %>% slickR::slickR(slideId = "exp_density")
+```
+
+上图为所有基因的表达量概率密度分布图（详细结果: GeneExp/density），图中横坐标为 log~10~(FPKM)，该数值越高，表示基因表达量越高；纵坐标为基因的密度，即为对应横轴表达量的基因数/检测已表达基因的总数；图中每种颜色表示一个样本，所有概率的总和为 1，即每个区域的面积均为 1；密度曲线的峰值表示整个样本基因表达量最集中的区域。
+
+根据表达量的计算结果表格，对各样本中鉴定到的基因进行统计，并对各样本间共有特有的基因统计结果进行Upset图展示，结果见图（详细结果: GeneExp/upset）：
+
+```{r exp_upset, fig.cap="各样本鉴定的基因 Upset图"}
+# include_graphics(snakemake@params[["exp_upset"]][1])
+snakemake@input[["exp_upset"]] %>% slickR::slickR(slideId = "exp_upset")
+```
+根据所有基因的 FPKM计算结果表格，将表达量分为不同的区间，对各样本在不同表达量区间内的基因的数目进行统计，结果如下图所示（详细结果: GeneExp/histogram）：
+
+```{r exp_histogram, fig.cap = "FPKM 区间统计图"}
+exp_histogram_dir <- snakemake@input[["exp_histogram_dir"]]
+figs <- list()
+for(i in seq_along(exp_histogram_dir)){
+    figs[[i]] <- list.files(path = exp_histogram_dir[[i]], pattern = ".png$", full.names = T)
+}
+figs <- unlist(figs)
+if(length(figs)>20)
+{
+  figs <- figs[1:20]
+}
+figs %>% slickR::slickR(slideId = "exp_histogram")
+```
+
+### 样本相关性分析
+
+
+皮尔逊相关系数 r（Pearson’s Correlation Coecient）是生物学重复相关性的评估指标， r 越接近 1 ，说明两个重复样品相关性越强。对各样本两两求皮尔逊相关系数，绘制表达热图，如下图所示（详细结果: GeneExp/correlation）：
+
+
+```{r exp_correlation, fig.cap="样本相关性热图"}
+# include_graphics(snakemake@params[["exp_correlation"]])
+snakemake@input[["exp_correlation"]] %>% slickR::slickR(slideId = "exp_correlation")
+```
+
+图中横纵坐标均为样本名称，颜色代表皮尔什相关系数R的大小，越接近 1，代表两样本的相关性越强。
+
+
+### 样品主成分分析
+
+主成分分析（Principal Component Analysis， PCA），是一种掌握事物主要矛盾的统计分析方法。在 RNA 测序数据分析中，主成分分析试图在力保数据信息丢失最少的原则下，用较少的主成分变量代替原本全基因组基因表达信息，而且这些主成分变量间互不相关。如果我们将获得的第一大主成分投影在第一个坐标上，第二大主成分投影在第二个坐标上，主成份分析方法便可以对样本聚类情况进行可视化，即可直观的观察到实验组和对照组的样本聚类是如何的。 结果如下图所示（详细结果: GeneExp/PCA）：
+
+
+```{r exp_pca, fig.cap="基因表达PCA分析"}
+# include_graphics(snakemake@params[["exp_pca"]][1])
+snakemake@input[["exp_pca"]] %>% slickR::slickR(slideId = "exp_pca")
+```
+
+
+## 基因表达差异分析
+
+基因或转录本表达具有时间和空间特异性，外界刺激和内部环境都是基因或转录本的表达发生变化的影响因素。在不同条件（如对照与处理、野生型和突变型、不同时间点、不同组织等）下，表达水平存在显著差异的基因，称之为差异表达基因 (Differentially Expressed Gene，DEG)。同样地，表达水平存在显著差异的转录本，称之为差异表达转录本（Differentially Expressed Transcript，DET）。在生物信息学中，寻找差异表达转录本或差异表达基因的过程叫做差异表达分析（Differential Expression Analysis）。在分析结果中，通常使用“A_VS_B”的方式来命名。
+
+一般情况下，对于两个样品之间的差异表达集，A 表示对照样品或前一个时间点的样品，而 B 表示对应的处理样品或者后一个时间点的样品。根据两组样品之间表达水平的相对高低，差异表达基因可以划分为上调基因（Up-regulated Gene）和下调基因（Down-regulated Gene）。上调基因在样品 B 中的表达水平高于样品 A 中的表达水平；反之为下调基因。因此，上调和下调是相对的，由所给 A 和 B 的顺序决定，若更换 A 和 B 的顺序会完全反过来，但这不会对分析结果产生实质性的影响。
+
+### 差异表达分析
+
+使用 edgeR 分析转录本和基因水平上的差异表达。 差异表达基因的标准为：
+
+- 考虑在两个样本中 mapping reads 数之和 ≥10 的基因或转录本；
+
+- 计算表达倍数变化（fold change），满足 |log~2~(fold change)| >1；
+
+- 对 P 值进行 FDR 校正得到 Q 值，同时满足 P 值 ≤0.05 和 Q 值 ≤0.05。
+
+
+满足以上标准的即认为是差异表达的转录本和基因。
+
+差异基因分析结果示例如下表（详细结果: DiffExpGene/case_vs_control/case_vs_control_diff.xls）：
+
+
+```{r deg}
+deg <- read_tsv(snakemake@input[["deg"]][1]) %>% rename(case=sampleA, control=sampleB)
+deg <- deg[, !(str_detect(colnames(deg), "FPKM|TPM"))]
+datatable(head(deg), rownames = FALSE, filter="top", caption = htmltools::tags$caption(
+   style = 'text-align: center;', htmltools::em('差异基因分析结果表')), options = list(pageLength = 5, scrollX=T) )
+```
+
+<font size=2>gene_id:  差异表达的基因</font>
+
+<font size=2>case:  实验组</font>
+
+<font size=2>control:  对照组</font>
+
+<font size=2>logFC:  表示两样品间表达量的比值，对其取以2为底的对数之后即为log2FC。默认取log2FC绝对值大于1为差异基因的筛选标准</font>
+
+<font size=2>logCPM:  对CPM取以2为底的对数之后即log2(CPM), CPM（count-per-million)标准化</font>
+
+<font size=2>pvalue:  统计学显著水平</font>
+
+<font size=2>FDR :  即False Discovery Rate，错误发现率，是通过对差异显著性p值（p-value）进行校正得到的。</font>
+
+<font size=2>level: Increased表示上调，Decreased表示下调， nonsignificant表示非差异基因。</font>
+
+<font size=2>样品名（FPKM / TPM）:  该样本的FPKM或TPM值, 未展示，请查看原始结果。</font>
+
+### 各组差异基因数目统计
+
+不同差异方案间的差异基因数量进行统计，分析不同差异方案之间差异基因个数，并进行可视化展示。结果如下图所示（详细结果: DiffExpGene/All.DEGs.stat.barplot.png）：
+
+```{r DEGs_barplot, fig.cap = "各组差异基因数目统计图"}
+DEGs_barplot <- snakemake@input[["DEGs_barplot"]]
+figs <- list()
+for (i in seq_along(DEGs_barplot)){
+    figs[[i]] <-  list.files(path = DEGs_barplot[[i]] , pattern = "*.png$", full.names = T)
+}
+figs <- unlist(figs)
+figs %>% slickR::slickR(slideId = "metastats_boxplot")
+
+```
+
+```{r DEGs_allplot, fig.cap= "各组差异基因点图"}
+snakemake@input[["DEGs_allplot"]] %>% slickR::slickR(slideId = "DEGs_allplot")
+```
+每组选择差异倍数最大的gene,在图中标注出基因名
+
+### 组间差异基因venn/花瓣图
+
+差异方案>=2个时，对不同差异方案间的差异基因进行统计，分析不同差异方案之间共有、特有的差异基因个数，并进行可视化展示。当差异方案数<=5时，绘制成韦恩图（Venn Plot)，当差异方案数>5时，会展示花瓣图(Flower Plot)，当差异方案数=1时，仅展示差异gene个数，结果如下图所示（详细结果: DiffExpGene/DEGs_venn_or_flower.pdf）：
+```{r DEGs_venn_or_flower, fig.cap= "组间差异基因venn/花瓣图"}
+snakemake@input[["DEGs_venn_or_flower"]] %>% slickR::slickR(slideId = "DEGs_venn_or_flower")
+```
+
+### 差异基因表达 M-A 图
+
+
+```{r deg_ma, fig.cap= "差异基因表达 M-A 图"}
+# include_graphics(snakemake@params[["deg_ma"]][1])
+snakemake@input[["deg_ma"]] %>% slickR::slickR(slideId = "deg_ma")
+```
+
+结果如上图所示（详细结果: DiffExpGene/case_vs_control/case_vs_control_MA.pdf），图中的每一个点表示一个基因，横坐标表示基因在两样品/组别中的表达量；纵坐标表示基因在两样品中表达量差异倍数的对数值log~2~(fold change)。横坐标绝对值越大，说明该基因的表达量越高；纵坐标值越大，说明表达量在两样品间的表达量倍数差异越大。有显著性差异表达的基因用红色点和绿色点表示（红色表示差异表达升高，绿色表示差异表达降低），无显著差异表达的基因用灰色点表示。
+
+
+### 差异基因表达火山图
+
+
+```{r deg_volcano, fig.cap="差异基因表达火山图"}
+# include_graphics(snakemake@params[["deg_volcano"]][1])
+snakemake@input[["deg_volcano"]] %>% slickR::slickR(slideId = "deg_volcano")
+```
+
+结果如上图所示（详细结果: DiffExpGene/case_vs_control/case_vs_control_Volcano.pdf），图中的每一个点表示一个基因，横坐标表示基因在两样品中表达量差异倍数的对数值log~2~(fold change)；纵坐标表示基因表达量变化的 FDR 值的负对数值。横坐标绝对值越大，说明表达量在两样品间的表达量倍数差异越大；纵坐标值越大，表明差异表达越显著。有显著性差异表达的基因用红色点和绿色点表示（红色表示差异表达升高，绿色表示差异表达降低），无显著差异表达的基因用灰色点表示。
+
+
+### 差异基因聚类热图
+
+对筛选出的差异表达基因做层次聚类分析，将具有相同或相似表达行为的基因进行聚类，结果如下图所示（详细结果: DiffExpGene/case_vs_control/case_vs_control_heatmap.pdf）：
+
+
+```{r deg_heatmap, fig.cap="差异聚类聚类热图"}
+# include_graphics(snakemake@params[["deg_heatmap"]][1])
+snakemake@input[["deg_heatmap"]] %>% slickR::slickR(slideId = "deg_heatmap")
+```
+
+每一列代表不同的样品；行代表不同的基因；相应的颜色就代表了基因在样品中的表达量的高低。 红色表示基因在样品中高表达，蓝色表示基因在样品低表达。
+
+### 差异基因基因组圈图
+
+我们使用R语言ggbio包，根据基因组信息,RNA整体表达情况，差异RNA表达分析结果，在基因组上标记RNA。（详细结果: DiffExpGene/case_vs_control/case_vs_control_circle.pdf）
+
+```{r ggbio_circle, fig.cap="基因组圈图"}
+# include_graphics(snakemake@params[["ggbio_circle"]][1])
+snakemake@input[["ggbio_circle"]] %>% slickR::slickR(slideId = "ggbio_circle")
+```
+
+注：最外圈是染色体条带，最内圈是差异表达基因log2FoldChange值的柱状图，中间两圈是两组gene的log2(fpkm+1)分布图。
+
+## 差异基因 GO 和 KEGG 富集分析
+
+差异表达基因的富集分析，能够从生物学通路的角度，提示我们什么样的通路在样本分组间 有 明 显 的 表 达 差 异 ， 即 样 本 差 异 在 基 因 功 能 上 的 体 现 。 使用eggNOG构建go KEGG数据库，然后使用 R 包 [clusterProfiler](http://bioconductor.org/packages/release/bioc/html/clusterProfiler.html){target="_blank"}， 对差异基因进行 GO 和KEGG 富集分析。 实际报告会以所有差异表达基因，所有上调的差异表达基因，所有下调的差异表达基因分别开展富集分析。此处，本实验模板仅展示基于所有差异表达基因的分析结果。
+
+### 差异表达基因 GO 富集分析
+
+#### 差异表达基因 GO 富集分析结果
+
+Gene Ontology（简称 GO， http://www.geneontology.org/） 是基因功能国际标准分类体系， 根据实验目的筛选差异基因后，研究差异基因在 Gene Ontology 中的分布状况将阐明实验中样本差异在基因功能上的体现。通过 GO 富集分析，按照 Cellular componen（CC） 、 Molecular Function（MF） 、 Biological process（BP） 对差异表达基因进行分类。富集分析结果见下表（详细结果: GO_enrich/case_vs_control/go_enrich_\*.xls）：
+
+
+```{r deg_go}
+deg_go <- read_tsv(snakemake@input[["deg_go"]][1]) %>% select(-geneID)
+datatable(head(deg_go), rownames = FALSE, filter="top", caption = htmltools::tags$caption(
+   style = 'text-align: center;', htmltools::em('差异表达基因 GO 富集分析结果（展示部分）')), options = list(pageLength = 5, scrollX=T) )
+```
+
+<font size=2>ID:  基因本体论ID</font>
+
+<font size=2>Description: 对应ID的功能说明</font>
+
+<font size=2>GeneRatio:  差异基因富集到功能词条的数量占所有差异基因数量的比例</font>
+
+<font size=2>BgRatio:  所有基因中，富集到功能词条的数量占所有基因的比例</font>
+
+<font size=2>pvalue: 统计学显著水平 </font>
+
+<font size=2>p.adjust:  采用BH方法进行多重试验校正后的p值</font>
+
+<font size=2>qvalue:  用 FDR 方法校正后的 p 值，以减少错误率</font>
+
+<font size=2>geneID:  体现该功能的基因ID, 本表未展示，见附件</font>
+
+<font size=2>count:  数量，即为GeneRatio的分子</font>
+
+
+#### 差异表达基因 GO 富集分析图
+
+差异基因 GO 富集条形图，直观的反映出富集的 GO 功能上目标基因的个数分布情况。我们分别从 BP、 CC 和 MF 三大类中挑选了富集最显著(p-value 水平)10 个 GO 功能在图中展示，如果不足 10 条，则全部展示，p<0.05的功能用"\*"标注，结果如下图所示（详细结果: GO_enrich/case_vs_control/barplot_\*.pdf）：  
+
+**GO 富集分析条形图**
+
+
+```{r go_barplot, fig.cap="GO 富集分析条形图"}
+# include_graphics(snakemake@params[["go_barplot"]][1])
+snakemake@input[["go_barplot"]] %>% slickR::slickR(slideId = "go_barplot")
+```
+
+本图为差异表达基因的 GO 富集分析条形图，纵坐标是显著差异的GO分类条目，横坐标为富集到该GO term的差异基因数目。   
+
+**GO 富集分析气泡图**
+
+
+```{r go_dotplot, fig.cap="GO 富集分析气泡图"}
+# include_graphics(snakemake@params[["go_dotplot"]][1])
+snakemake@input[["go_dotplot"]] %>% slickR::slickR(slideId = "go_dotplot")
+```
+
+结果如上图所示（详细结果: GO_enrich/case_vs_control/dotplot_\*.pdf），本图为差异表达基因的 GO 富集分析气泡图，纵坐标是显著差异的GO分类条目，横坐标为Ratio，表示差异基因富集到该GO条目的基因数与所有基因富集到该GO条目的基因数的比值，气泡的颜色代表富集显著性p值，气泡大小代表差异表达基因数目。
+
+**GO 有向无环图**
+
+
+如果一个有向图从任意顶点出发无法经过若干条边回到该点，这个图就是一个有向无环图（directed acyclic graph，DAG）。有向无环图也是差异基因GO富集分析结果的图形化展示方式之一。图中，分支代表包含关系，从上至下所定义的功能范围越来越小，一般选取GO富集分析的结果前10位作为有向无环图的主节点，并通过包含关系，将相关联的GO Term一起展示，颜色的深浅代表富集程度。我们绘制生物过程(biological process,BP)分子功能(molecular function,MF)和细胞组分(cellular component,CC)的DAG图,下图仅展示部分结果（详细结果: GO_enrich/case_vs_control/DAG）：
+
+```{r bp_dagplot, fig.cap="GO 富集分析有向无环图(BP)"}
+ #include_graphics(snakemake@params[["bp_dagplot"]][1])
+ snakemake@input[["bp_dagplot"]] %>% slickR::slickR(slideId = "bp_dagplot")
+```
+
+```{r cc_dagplot, fig.cap="GO 富集分析有向无环图(CC)"}
+ #include_graphics(snakemake@params[["cc_dagplot"]][1])
+ snakemake@input[["cc_dagplot"]] %>% slickR::slickR(slideId = "cc_dagplot")
+```
+
+```{r mf_dagplot, fig.cap="GO 富集分析有向无环图(MF)"}
+ #include_graphics(snakemake@params[["mf_dagplot"]][1])
+ snakemake@input[["mf_dagplot"]] %>% slickR::slickR(slideId = "mf_dagplot")
+```
+
+以上图分别为差异表达基因的 GO 生物学过程（Biological Process，BP），细胞组分(cellular component,CC)，分子功能(molecular function,MF)有向无环图，每个节点代表一个GO术语，矩形代表富集到的top10个GO terms, 颜色的深浅代表富集程度，颜色越深就表示富集程度越高，图形中每个节点上文字描述是：GO term编号，前景基因中注释到该term的基因数目/背景基因中注释到该term的基因数。
+
+
+### 差异表达基因 KEGG 富集分析
+
+#### 差异表达基因 KEGG 富集分析结果
+
+在生物体内，不同基因相互协调行使其生物学功能，通过 Pathway 显著性富集分析能确定差异表达基因主要参与的最主要生化代谢通路和信号转导通路。 本报告采用 R 软件包 clusterProfiler进行 [KEGG](http://www.genome.jp/kegg/){target="_blank"}  富集分析。Pathway显著性富集分析时以 KEGG Pathway 为单位，应用超几何检验，找出与整个基因组背景相比，在差异表达基因中显著性富集的 Pathway。 KEGG 富集分析结果如下表所示（详细结果: KEGG_enrich/case_vs_control/kegg_enrich_\*.xls）：
+
+
+```{r deg_kegg}
+kegg_res <- read_tsv(snakemake@input[["deg_kegg"]][1]) %>% select(-geneID)
+datatable(head(kegg_res), rownames = FALSE, filter="top", caption = htmltools::tags$caption(
+   style = 'text-align: center;', htmltools::em('差异表达基因 KEGG 富集分析结果')), options = list(pageLength = 5, scrollX=T) )
+```
+
+<font size=2>ID:  KEGG pathway ID</font>
+
+<font size=2>Description: 对应ID的功能说明</font>
+
+<font size=2>GeneRatio:  差异基因富集到功能词条的数量占所有差异基因数量的比例</font>
+
+<font size=2>BgRatio:  所有基因中，富集到功能词条的数量占所有基因的比例</font>
+
+<font size=2>pvalue: 统计学显著水平 </font>
+
+<font size=2>p.adjust:  采用BH方法进行多重试验校正后的p值</font>
+
+<font size=2>qvalue:  用 FDR 方法校正后的 p 值，以减少错误率</font>
+
+<font size=2>geneID:  体现该功能的基因ID, 本表未展示，见附件</font>
+
+<font size=2>count:  数量，即为GeneRatio的分子</font>
+
+
+#### 差异表达基因 KEGG 富集分析图
+
+**KEGG pathway 富集分析条形图**    
+
+通过条形图对差异基因KEGG富集结果进行展示。条形图可直观的反映出富集在各类信号通路上差异基因的分布情况。挑选富集最显著的20个KEGG通路在图中展示(若不足20条，则全部显示)，p<0.05的通路用"*"标注，结果如下图所示（详细结果: KEGG_enrich/case_vs_control/barplot_\*.pdf）：  
+
+
+```{r kegg_barplot, fig.cap="KEGG pathway 富集分析条形图"}
+# include_graphics(snakemake@params[["kegg_barplot"]][1])
+snakemake@input[["kegg_barplot"]] %>% slickR::slickR(slideId = "kegg_barplot")
+```
+
+纵坐标是KEGG pathway，横坐标为富集到该路径的差异基因数，颜色代表富集显著性p值。  
+
+**KEGG 富集分析气泡图**  
+
+气泡图是 KEGG 富集分析结果的图形化展示方式。在此图中， KEGG 富集程度通过 Rich factor、 pvalue 和富集到此通路上的基因个数来衡量。其中 Rich factor 指差异表达的基因中位于该 pathway 条目的基因数目与所有有注释基因中位于该 pathway 条目的基因总数的比值。 Rich factor 越大，表示富集的程度越高。 pvalue越接近于零，表示富集越显著。此图一般展示富集最显著的 10 条 pathway，若富集的 pathway 不足 10 条，则全部展示。 Case 和 Control 组间差异表达基因 KEGG通路富集分析气泡图结果见下图（详细结果: KEGG_enrich/case_vs_control/dotplot_\*.pdf）：  
+
+
+```{r kegg_dotplot, fig.cap="KEGG 富集分析气泡图"}
+# include_graphics(snakemake@params[["kegg_dotplot"]][1])
+snakemake@input[["kegg_dotplot"]] %>% slickR::slickR(slideId = "kegg_dotplot")
+```
+
+横坐标为 Ratio，表示差异基因富集到该通路的基因数与所有基因富集到该通路的基因数的比值， Ratio 数值越大，表示差异表达基因在该条 KEGG 通路中富集程度越高。气泡的颜色代表富集显著性，气泡大小为富集到该通路差异表达基因的数目。图中气泡越靠近右上角，表示富集程度越高，参考价值越大；反之，条目越靠近左下角，参考价值越小。
+
+**富集KEGG通路图**  
+
+为便于查看差异基因在通路图中的分布情况，我们将差异基因标注到通路图中，结果示例图片如下图所示（详细结果: KEGG_enrich/case_vs_control/maps）：
+
+```{r kegg_map_example, fig.cap="富集KEGG通路图示例"}
+# include_graphics(snakemake@params[["kegg_map_example"]])
+snakemake@input[["kegg_map_example"]] %>% slickR::slickR(slideId = "kegg_map_example")
+```
+
+上图中，红色表示包含上调基因的KO节点，绿色表示包含下调基因的KO节点，蓝色表示包含上下调的KO节点。
+每个png文件都有一个对应的html，点击不同的通路名称会弹出相应的通路图，鼠标悬停于标记的KO节点（红色，绿色，蓝色标记的点），弹出差异基因细节框，标色同上，括号中数字为log2(Fold change)。联网状态下点击各个节点，可以连接到KEGG官方数据库中查看各个KO的具体信息页。
+
+为了更方便查看富集kegg通路图，我们在KEGG通路注释图中加入了本地链接以及网页链接详细结果: KEGG_enrich/case_vs_control/kegg_enrich_all_weblink.xls）。
+
+
+<font size=2>ID:  KEGG pathway ID</font>
+
+<font size=2>Description: 对应ID的功能说明</font>
+
+<font size=2>GeneRatio:  差异基因富集到功能词条的数量占所有差异基因数量的比例</font>
+
+<font size=2>BgRatio:  所有基因中，富集到功能词条的数量占所有基因的比例</font>
+
+<font size=2>pvalue: 统计学显著水平 </font>
+
+<font size=2>p.adjust:  采用BH方法进行多重试验校正后的p值</font>
+
+<font size=2>qvalue:  用 FDR 方法校正后的 p 值，以减少错误率</font>
+
+<font size=2>geneID:  体现该功能的基因ID, 本表未展示，见附件</font>
+
+<font size=2>count:  数量，即为GeneRatio的分子</font>
+
+
+## GSEA 分析图
+GSEA（Gene Set EnrichmentAnalysis），即基因集富集分析，它的基本思想是使用预定义的基因集（通常来自功能注释或先前实验的结果），将基因按照在两类样本中的差异表达程度排序，然后检验预先设定的基因集合是否在这个排序表的顶端或者底端富集。基因集合富集分析检测基因集合而不是单个基因的表达变化，因此可以包含这些细微的表达变化，预期得到更为理想的结果。
+部分分析结果如下表所示，详细分析结果见（GSEA/case_vs_control/GO或KEGG）
+
+```{r gsea}
+gsea_dirs <- snakemake@input[["gsea_dir"]]
+tabs <- list()
+for (i in seq_along(gsea_dirs)){
+    tabs[[i]] <-  list.files(path = gsea_dirs[[i]] , pattern = "go.xls$", full.names = T)
+}
+tabs <- unlist(tabs)
+data <- read_tsv(tabs[[1]])
+kable(head(data))%>%
+  kable_styling(bootstrap_options = "striped", full_width = T, position = "center") 
+```
+<font size=2>(1) ID: 通路编号</font>  
+<font size=2>(2) Description: 通路分类的名称</font>  
+<font size=2>(3) setSize: 该通路条目中包含表达数据集中的基因数目</font>  
+<font size=2>(4) enrichmentScore: 富集评分</font>  
+<font size=2>(5) NES: 校正后的归一化的ES值,由于不同用户输入的基因数据库文件中的基因集数目可能不同，富集评分的标准化考虑了基因集个数和大小</font>  
+<font size=2>(6) pvalue: 富集得分ES的统计学显著性水平，用来表征富集结果的可信度</font>  
+<font size=2>(7) p.adjust: 校准后的P值</font>  
+<font size=2>(8) rank: 通路排名</font>  
+<font size=2>(9) tags表示核心基因占该基因集基因总数的比例，而list表示核心基因占所有基因总数的比例，signal利用这两个指标计算得到，当核心基因的数目和该基因集下的基因总数相同，signal取值最大，当该基因集的基因数目和所有基因数目接近时，signal的取值接近于0</font>  
+<font size=2>(10) core_enrichment: 核心基因</font>  
+
+下图为示例图片，详细分析结果见（GSEA/case_vs_control/GO或KEGG）
+
+```{r gsea_exp, fig.cap="GSEA分析示例图"}
+# include_graphics(snakemake@params[["gsea_exp"]])
+snakemake@input[["gsea_exp"]] %>% slickR::slickR(slideId = "gsea_exp")
+```
+
+上图分为3部分，如下：
+第一部分：最顶部的折线为基因Enrichment Score的折线图。纵轴为对应的Running ES, 在折线图中有个峰值，该峰值就是这个基因集的Enrichemnt score，峰值之前的基因就是该基因集下的核心基因。横轴代表此基因集下的每个基因，对应第二部分类似条形码的竖线。
+第二部分：类似条形码的部分，为Hits，每条竖线对应该基因集下的一个基因。
+第三部分：为所有基因的rank值分布图，纵坐标为ranked list metric，即该基因排序量的值，可理解为“公式化处理后的foldchange值”。
+
+
+## 可变剪切分析
+
+[rmats](http://rnaseq-mats.sourceforge.net/rmats4.0.2/index.html){target="_blank"} 是目前使用的最广泛的可变剪切分析软件，该软件不仅可以识别可变剪切事件，还提供了定量和组间差异分析的功能。rmats可以识别以下五种类型的可变剪切事件：
+
+
+```{r as_envent, fig.cap="可变剪切类型图"}
+# include_graphics(snakemake@params[["as_envent"]])
+snakemake@input[["as_envent"]] %>% slickR::slickR(slideId = "as_envent")
+```
+
+rmats采用exon inclusion level 来定义样本中可变剪切事件的表达量，以外显子跳跃为例，正常的isoform称之为Exon Inclusion Isoform, 发生了外显子跳跃的转录本称之为Exon Skipping Isoform, 示意如下:
+
+
+```{r as_exon_skip_isoform, fig.cap="外显子跳跃转录本示意图", fig.height=1, fig.width = 5}
+# include_graphics(snakemake@params[["as_exon_skip_isoform"]])
+snakemake@input[["as_exon_skip_isoform"]] %>% slickR::slickR(slideId = "as_exon_skip_isoform")
+```
+
+比对到inclusion isoform上的reads用I表示，比对到skipping isoform上的reads用S表示, 则该外显子跳跃的可变剪切事件的表达量计算公式如下：  
+$$
+\hat{\psi}=(I/lI)/(I/lI+S/lS)
+$$
+可以看到，exon inclusion level实际上是inclusion isofrom所占的比例，计算时，用长度校正了原始的reads数。其他类型的可变剪切事件也可以划分成上述两种isoform, 示意图如下：  
+
+
+```{r as_envent_exon_inclusion_level}
+# include_graphics(snakemake@params[["as_envent_exon_inclusion_level"]])
+snakemake@input[["as_envent_exon_inclusion_level"]] %>% slickR::slickR(slideId = "as_envent_exon_inclusion_level")
+```
+
+可以看到，rmats在计算isofrom的长度时，提供了两种方式，二者的区别就在于是否考虑跳过的exon的长度，详细的公式在上图中共也有给出。
+rmats 在差异分析时，比较的就是两组样本中exon inclusion level的差异，给定阈值c, 判断两个样本中对应inclusion level 的是否发生了变化，公式如下:
+$$
+|\psi1-\psi2|<c
+$$
+c这个阈值通过--cstat参数自定义，取值范围为0-1，代表的是两个样本中inclusion level的差值，0.1表示两个样本中该可变剪切事件的inclusion level相差10%。rmats考虑数据的分布，对应的统计模型等各种因素,会给出每个可变剪切事件的p值和多重假设检验校正后的FDR值。结果存放在`r snakemake@input[["rmats_res"]]`目录下。
+
+在输出目录下,我们重点关注如下两种文件：
+1.AS_Event.MATS.JC.txt
+2.AS_Event.MATS.JCEC.txt 
+这里的AS_Event对应五种不同类型的可变剪切事件，每种类型是一个单独的文件，而JC和JCEC对应的是isoform effective length的两种计算方式。在这些文件中，包含了定量和差异分析的结果。示例如下表所示（详细结果: Isoform_Alternative_Splicing/case_vs_control）：
+
+
+```{r}
+f <- paste0(snakemake@input[["rmats_res"]][1], "/SE.MATS.JC.txt")
+data <- read_tsv(f)
+datatable(head(data), rownames = FALSE, filter="top", caption = htmltools::tags$caption(
+   style = 'text-align: center;', htmltools::em('rmats定量和差异分析结果示例')), options = list(pageLength = 5, scrollX=T) )
+```
+
+
+可变剪接事件的预测结果中，文件说明如表：  
+
+| 表头                | 描述                                                         | 备注            |
+| ------------------- | ------------------------------------------------------------ | --------------- |
+| ID                  | 可变剪接ID，每一个类型一个编号，包括已知和预测               |                 |
+| GeneID              | 基因ID                                                       |                 |
+| geneSymbol          | 基因名字                                                     |                 |
+| chr                 | 染色体                                                       |                 |
+| stand               | 所在链的方向                                                 |                 |
+| IJC_SAMPLE_1        | 对照样品跨越inclusionjunction位点的reads数目，重复样品用逗号隔开 |                 |
+| SJC_SAMPLE_1        | 对照样品跨越skippingjunction位点的reads数目，重复样品用逗号隔开 |                 |
+| IJC_SAMPLE_2        | 处理样品跨越inclusionjunction位点的reads数目，重复样品用逗号隔开 |                 |
+| SJC_SAMPLE_2        | 处理样品跨越skippingjunction位点的reads数目，重复样品用逗号隔开 |                 |
+| PValue              | 显著性统计值                                                 |                 |
+| FDR                 | 多重假设检验校正后的统计值                                   |                 |
+| IncFormLen          | InclusionForm的长度，用于标准化                              |                 |
+| SkipFormLen         | SkippingForm的长度，用于标准化                               |                 |
+| IncLevel1           | SAMPLE_1的inclusionlevel，重复用逗号隔开                     |                 |
+| IncLevel2           | SAMPLE_2的inclusionlevel，重复用逗号隔开                     |                 |
+| IncLevelDifference  | InLevel1和IncLevel2的平均值的差                              |                 |
+| longExonStart_0base | 长外显子起始位点                                             | A3SS和A5SS结果  |
+| longExonEnd         | 长外显子终止位点                                             | A3SS和A6SS结果  |
+| shortES             | 短外显子起始位点                                             | A3SS和A7SS结果  |
+| shortEE             | 短外显子终止位点                                             | A3SS和A8SS结果  |
+| flankingES          | 差异外显子附近外显子的起始位点                               | A3SS和A9SS结果  |
+| flankingEE          | 差异外显子附近外显子的终止位点                               | A3SS和A10SS结果 |
+| 1stExonStart_0base  | 第一个外显子起始位点                                         | MXE结果         |
+| 1stExonEnd          | 第一个外显子终止位点                                         | MXE结果         |
+| 2ndExonStart_0base  | 第二个外显子起始位点                                         | MXE结果         |
+| 2ndExonEnd          | 第二个外显子终止位点                                         | MXE结果         |
+| upstreamES          | 上游外显子起始位点                                           | MXE/RI/SE结果   |
+| upstreamEE上        | 游外显子终止位点                                             | MXE/RI/SE结果   |
+| downstreamES        | 下游外显子起始位点                                           | MXE/RI/SE结果   |
+| downstreamEE        | 下游外显子终止位点                                           | MXE/RI/SE结果   |
+| riExonStart_0base   | 包含内含子的外显子的起始位点                                 | RI结果          |
+| riExonEnd           | 包含内含子的外显子的终止位点                                 | RI结果          |
+| exonStart_0base     | 跳过的外显子的起始位点                                       | SE结果          |
+| exonEnd             | 跳过的外显子的终止位点                                       | SE结果          |
+
+
+## 基因 COG 分析
+
+COG即“同源蛋白簇” 。 原核生物一般称为 COG 数据库；真核生物一般称为 KOG 数据
+库。由 NCBI 创建并维护的蛋白数据库，根据细菌、藻类和真核生物完整基因组的编码
+蛋白系统进化关系分类构建而成。通过比对可以将某个蛋白序列注释到某一个COG中，
+每一簇 COG 由直系同源序列构成，从而可以推测该序列的功能。我们利用 DIAMOND 软件将gene与 COG 库的蛋白序列进行比对（ blastp， evalue
+≤ 1e-5），取分值最高的比对结果序列的注释作为该gene的注
+释。结合 COG 数据库的层次结构，我们可以统计出 COG 各个层级或水平的信息。
+
+
+```{r cog_anno}
+cog_anno <- read_tsv(snakemake@input[["cog_anno"]][1])
+datatable(head(cog_anno), rownames = FALSE, filter="top", caption = htmltools::tags$caption(style = 'text-align: center;', htmltools::em('基因 COG 分析结果')), options = list(pageLength = 5, scrollX=T) )
+```
+
+<font size=2>Protein_ID: 比对蛋白序列 ID</font>
+
+<font size=2>COG_ID: COG ID</font>
+
+<font size=2>COGFunctionalCategory: COG 功能分类</font>
+
+<font size=2>COGFunctionalCategoryDescription: COG 功能分类描述</font>
+
+<font size=2>NOGDescription: NOG 描述</font>
+
+根据 COG 注释总表，可以对 COG 注释的总体情况进行 gene 数目的统计。统计图如下:
+
+```{r cog_dir, fig.cap="COG 分类统计图"}
+# include_graphics(snakemake@params[["cog_dir"]][1])
+snakemake@input[["cog_dir"]] %>% slickR::slickR(slideId = "cog_dir")
+```
+
+说明：横轴为 COG 的各个二级分类，纵轴代表注释到的 gene 数目。
+
+# 所用软件列表
+
+| 软件            | 官网                                                         |
+| :-------------- | ------------------------------------------------------------ |
+| fastp           | https://github.com/OpenGene/fastp                            |
+| bowtie2         | http://bowtie-bio.sourceforge.net/bowtie2/index.shtml        |
+| hisat2          | https://ccb.jhu.edu/software/hisat2/index.shtml              |
+| rseqc           | http://rseqc.sourceforge.net/                                |
+| stringtie       | https://ccb.jhu.edu/software/stringtie/                      |
+| R               |https://www.r-project.org/                                    |
+| DESeq2          | https://bioconductor.org/packages/release/bioc/html/DESeq2.html |
+| edgeR           | https://bioconductor.org/packages/release/bioc/html/edgeR.html |
+| clusterProfiler | https://bioconductor.org/packages/release/bioc/html/clusterProfiler.html |
+| ramts           | http://rnaseq-mats.sourceforge.net/                          |
+| STRINGdb        | http://string-db.org/                                        |
+
+
+# 结果目录汇总
+
+---
+
+.  
+│  
+├── [01.Data_clean]{style="margin-right:20px"}  数据质量评估结果目录  
+│   [└── GC]{style="margin-right:20px; padding-left: 20px"}  测序错误率分布  
+│   [└── Error]{style="margin-right:20px; padding-left: 20px"}  GC含量分布  
+│   [└── fastp_stats.xls]{style="margin-right:20px; padding-left: 20px"}  总评估结果  
+│  
+├── [02.QC]{style="margin-right:20px"}  整体质量评估结果目录  
+│   [├── geneBody_coverage]{style="margin-right:20px; padding-left: 20px"}  RNA 降解分析结果目录  
+│   [├── read_distribution]{style="margin-right:20px; padding-left: 20px"}  基因组区域分布  
+│   [├── read_duplication]{style="margin-right:20px; padding-left: 20px"}  冗余序列分析  
+│   [├── RPKM_saturation]{style="margin-right:20px; padding-left: 20px"}  测序饱和度分析  
+│   [└── Mapping_stats.xls]{style="margin-right:20px; padding-left: 20px"}  基因组比对率统计表  
+│  
+├── [03.GeneExp]{style="margin-right:20px"}  表达基因分析结果目录  
+│   [├── boxplot]{style="margin-right:20px; padding-left: 20px"}  基因表达量盒形图目录  
+│   [├── correlation]{style="margin-right:20px; padding-left: 20px"}  样本相关性分析结果目录  
+│   [├── density]{style="margin-right:20px; padding-left: 20px"}  基因表达量密度分布图目录  
+│   [├── Histogram]{style="margin-right:20px; padding-left: 20px"}  基因表达量分布柱状图目录  
+│   [├── upset]{style="margin-right:20px; padding-left: 20px"}  各样本鉴定的基因 Upset图目录  
+│   [├── PCA]{style="margin-right:20px; padding-left: 20px"}  基因表达量主成分分析目录  
+│   [├── gene_count_matrix.txt]{style="margin-right:20px; padding-left: 20px"}  基因reads count 表达矩阵  
+│   [├── gene_fpkm_all_samples.txt]{style="margin-right:20px; padding-left: 20px"}  基因PFKM表达矩阵  
+│   [├── gene_tpm_all_samples.txt]{style="margin-right:20px; padding-left: 20px"}  基因TPM表达矩阵  
+│   [└── *_anno.txt]{style="margin-right:20px; padding-left: 20px"}  相关注释文件  
+│  
+├── [04.DiffExpGene]{style="margin-right:20px"}  表达基因差异分析结果目录  
+│   [├── DEGs_venn_or_flower.pdf]{style="margin-right:20px; padding-left: 20px"}  组间差异基因venn/flower plot  
+│   [└── case_vs_control]{style="margin-right:20px; padding-left: 20px"}  
+│       [├── case_vs_control_diff.xls]{style="margin-right:20px; padding-left: 50px"}  表达基因差异分析结果  
+│       [├── case_vs_control_heatmap.pdf]{style="margin-right:20px; padding-left: 50px"}  差异基因聚类分析热图  
+│       [├── case_vs_control_MA.pdf]{style="margin-right:20px; padding-left: 50px"}  差异基因MA图  
+│       [└── case_vs_control_Volcano.pdf]{style="margin-right:20px; padding-left: 50px"}  差异基因火山图  
+│       [└── case_vs_control_circle.pdf]{style="margin-right:20px; padding-left: 50px"}  差异基因基因组圈图  
+│  
+├── [05.GO_enrich]{style="margin-right:20px"}  GO分析结果目录  
+│   [└── case_vs_control ]{style="margin-right:20px; padding-left: 20px"}  
+│       [├── barplot\_{label}.pdf]{style="margin-right:20px; padding-left: 50px"}  GO富集分析柱形图，label取值为all, up, down  
+│       [├── dotplot\_{label}.png]{style="margin-right:20px; padding-left: 50px"}  GO富集分析柱形图，label取值为all, up, down  
+│       [├── go_enrich\_{label}.xls]{style="margin-right:20px; padding-left: 50px"}  GO富集分析表，label取值为all, up, down  
+│       [└── DAG]{style="margin-right:20px; padding-left: 50px"}  GO有向无环图结果目录，all, up, down  
+│  
+├── [06.KEGG_enrich]{style="margin-right:20px"}  KEGG分析结果目录  
+│   [└── case_vs_control ]{style="margin-right:20px; padding-left: 20px"}  
+│       [├── barplot\_{label}.pdf]{style="margin-right:20px; padding-left: 50px"}  KEGG富集分析柱形图，label取值为all, up, down  
+│       [├── dotplot\_{label}.pdf]{style="margin-right:20px; padding-left: 50px"}  KEGG富集分析柱形图，label取值为all, up, down  
+│       [├── kegg_enrich\_{label}.xls]{style="margin-right:20px; padding-left: 50px"}  KEGG富集分析表  
+│       [├── kegg_enrich\_{label}_weblink.xls]{style="margin-right:20px; padding-left: 50px"}  富集kegg通路图网页注释表，label取值为all  
+│       [└── maps]{style="margin-right:20px; padding-left: 50px"}  富集kegg通路图网页，label取值为all)  
+│  
+├── [07.novel_trans]{style="margin-right:20px"}  新转录本分析结果目录  
+│   
+├── [08.Annotation]{style="margin-right:20px"}  注释结果目录  
+│   [├── go ]{style="margin-right:20px; padding-left: 20px"}  GO 相关注释文件夹  
+│   [├── kegg ]{style="margin-right:20px; padding-left: 20px"}  KEGG相关注释文件夹  
+│   [├── eggnog.txt ]{style="margin-right:20px; padding-left: 20px"}  EGGNOG注释整理文件  
+│   [├── transcripts.fa ]{style="margin-right:20px; padding-left: 20px"}  转录本fasta序列文件  
+│   [├── gene_id2name.txt ]{style="margin-right:20px; padding-left: 20px"}  基因名对应文件  
+│   [└── gene2function.xls ]{style="margin-right:20px; padding-left: 20px"}  基因功能对应文件   
+│  
+├── [09.GSEA]{style="margin-right:20px"}  基因集富集分析结果目录  
+│   [└── case_vs_control/KEGG ]{style="margin-right:20px; padding-left: 20px"}  KEGG基因集富集分析结果目录  
+│   [└── case_vs_control/GO ]{style="margin-right:20px; padding-left: 20px"}  GO基因集富集分析结果目录  
+│   
+├── [10.COG]{style="margin-right:20px"}  基因 COG 分析结果目录  
+│  
+└── mRNA_report.html  
+
+---
+
+---
+
+
+# 参考文献
+
+Chen S, Zhou Yanqing, Chen Yaru, et al. fastp: an ultra-fast all-in-one FASTQ preprocessor[J]. Bioinformatics, 2018, 34(17):i884-i890.
+
+Langmead B, Salzberg, Steven L. Fast gapped-read alignment with Bowtie 2[J]. Nature Methods, 2012, 9(4):357-359.
+
+Kim D , Langmead B , Salzberg S L . HISAT: a fast spliced aligner with low memory requirements[J]. Nature Methods, 2015, 12(4):357-360.
+
+Wang L, Wang S, Li W. RSeQC: quality control of RNA-seq experiments[J]. Bioinformatics, 2012, 28(16):2184-5.
+
+Pertea M , Pertea G M , Antonescu C M , et al. StringTie enables improved reconstruction of a transcriptome from RNA-seq reads[J]. Nature Biotechnology, 2015, 33(3):290-295.
+
+Pertea M , Kim D , Pertea G M , et al. Transcript-level expression analysis of RNA-seq experiments with HISAT, StringTie and Ballgown[J]. Nature Protocols, 2016, 11(9):1650-1667.
+
+Love M I , Huber W , Anders S . Moderated estimation of fold change and dispersion for RNA-seq data with DESeq2[J]. Genome Biology, 2014, 15(12):550.
+
+Mccarthy D J , Chen Y , Smyth G K . Differential expression analysis of multifactor RNA-Seq experiments with respect to biological variation[J]. Nucleic Acids Research, 2012, 40(10):4288-4297.
+
+Yu G , Wang L G , Han Y , et al. clusterProfiler: an R Package for Comparing Biological Themes Among Gene Clusters[J]. OMICS-A JOURNAL OF INTEGRATIVE BIOLOGY, 2012, 16(5):284-287.
+
+Shen S , Park J W , Lu Z , et al. rMATS: Robust and flexible detection of differential alternative splicing from replicate RNA-Seq data[J]. Proc Natl Acad Sci U S A, 2014, 111(51):5593-601.
+
+
